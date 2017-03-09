@@ -1,7 +1,9 @@
 # mtl2opengl
 
 mtl2opengl Version 1.0 (09 March 2017)
+
 Copyright © 2017 Guilherme D'Amoreira
+
 <http://en.damoreira.com.br/>
 
 ## ABOUT
