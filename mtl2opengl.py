@@ -1,3 +1,101 @@
+#! /usr/bin/python
+# =head1 NAME
+# 
+#  mtl2opengl - converts obj and mtl files to arrays for use with OpenGL ES
+#  
+# =head1 SYNOPSIS
+# 
+#  mtl2opengl [options]
+# 
+#  use -help or -man for further information
+# 
+# =head1 DESCRIPTION
+# 
+# This script expects:
+# An OBJ file consisting of vertices (v), texture coords (vt) and normals (vn). The 
+# corresponding MTL file consisting of ambient (Ka), diffuse (Kd), specular (Ks), and 
+# exponent (Ns) components.
+# 
+# The resulting .H files offer three float arrays for the OBJ geometry data and
+# four float arrays for the MTL material data to be rendered.
+# 
+# =head1 AUTHOR
+# 
+# Guilherme D'Amoreira <http://en.damoreira.com.br/>
+# 
+# =head1 VERSION
+# 
+# 13 March 2017 (1.1)
+# 
+# =head1 VERSION HISTORY
+#  
+# Version 1.1
+# -----------
+# - Adjusted code to use class attributes
+# - Added docs on arguments parser
+# 
+# Version 1.0
+# -----------
+# First mtl2opengl.py transcode
+# 
+# =head1 COPYRIGHT
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# 
+# =head1 ACKNOWLEDGEMENTS
+# 
+# This script is based on the work of:
+# 
+# Ricardo Rendon Cepeda <https://github.com/ricardo-rendoncepeda/mtl2opengl>
+# 
+# Heiko Behrens <http://heikobehrens.net/2009/08/27/obj2opengl/>
+# 
+# Margaret Geroch <http://people.sc.fsu.edu/~jburkardt/pl_src/obj2opengl/obj2opengl.html>
+# 
+# =head1 REQUIRED ARGUMENTS
+# 
+# The argument --objfile (1) must be an OBJ file. 
+# The argument --mtlfile (2) must be the corresponding MTL file.
+# 
+# =head1 OPTIONS
+# 
+# =over
+# 
+# =item B<-noScale>    
+# 
+# Prevents automatic scaling. Otherwise the object will be scaled
+# such the the longest dimension is 1 unit.
+# 
+# =item B<-scale <float>>
+# 
+# Sets the scale factor explicitly. Please be aware that negative numbers
+# are not handled correctly regarding the orientation of the normals.
+# 
+# =item B<-noMove>
+# 
+# Prevents automatic scaling. Otherwise the object will be moved to the center of
+# its vertices.
+# 
+# =item B<-center>
+# 
+# Sets center point of the object to centralize.
+# 
+# =item B<-verbose>
+# 
+# Runs this script logging some information.
+#    
+# =cut
 import argparse
 import os
 import re
@@ -9,34 +107,79 @@ class ParameterInvalidException(Exception):
 
 
 class Converter():
-    def __init__(self, options={}):
-        self.options = options
+    def __init__(self, scalefac=0, verbose=None, xcen=None, ycen=None, zcen=None, objfile=None, mtlfile=None):
+        self.xcen = xcen
+        self.ycen = ycen
+        self.zcen = zcen
+        self.scalefac = scalefac
+        self.verbose = verbose
+        self.objfile = objfile
+        self.mtlfile = mtlfile
+
+        self.mNames = {}
+        self.mValues = {}
+
+        self.numVerts = 0
+        self.numFaces = 0
+        self.numTexture = 0
+        self.numNormals = 0
+        self.numMaterials = 0
 
     def init(self):
+        self.process_files()
+
         # derive center coords and scale factor if neither provided nor disabled
-        if not (self.options['scalefac'] and self.options['xcen']):
+        if not (self.scalefac and self.xcen):
             self.calcSizeAndCenter()
 
-        if self.options['verbose']:
+        if self.verbose:
             self.printInputAndOptions()
 
         self.loadDataMTL()
         self.loadDataOBJ()
         self.normalizeNormals()
 
-        if self.options['verbose']:
+        if self.verbose:
             self.printStatistics()
 
         self.writeOutputOBJ()
         self.writeOutputMTL()
 
+    def fileparse(self, path):
+        (dir_name, file_name) = os.path.split(path)
+        (file_base_name, file_extension) = os.path.splitext(file_name)
+        return (file_base_name, dir_name, file_extension)
+
+    def process_files(self):
+        if not self.objfile:
+            raise ParameterInvalidException()
+
+        if not self.mtlfile:
+            raise ParameterInvalidException()
+
+        (fileOBJ, dirOBJ, extOBJ) = self.fileparse(self.objfile)
+        self.inFilenameOBJ = '%s/%s%s' % (dirOBJ, fileOBJ, extOBJ)
+
+        (fileMTL, dirMTL, extMTL) = self.fileparse(self.mtlfile)
+        self.inFilenameMTL = '%s/%s%s' % (dirMTL, fileMTL, extMTL)
+
+        (fileOBJ, dirOBJ, extOBJ) = self.fileparse(self.inFilenameOBJ)
+        self.outFilenameOBJ = '%s/%s%s' % (dirOBJ, fileOBJ, "OBJ.h")
+
+        (fileMTL, dirMTL, extMTL) = self.fileparse(self.inFilenameMTL)
+        self.outFilenameMTL = '%s/%s%s' % (dirMTL, fileMTL, "MTL.h")
+
+        (fileOBJ, dirOBJ, extOBJ) = self.fileparse(self.inFilenameOBJ)
+        self.objectOBJ = '%s%s' % (fileOBJ, "OBJ")
+
+        (fileMTL, dirMTL, extMTL) = self.fileparse(self.inFilenameMTL)
+        self.objectMTL = '%s%s' % (fileMTL, "MTL")
+
     # Stores center of object in xcen, ycen, zcen
     # and calculates scaling factor scalefac to limit max
     # side of object to 1.0 units
     def calcSizeAndCenter(self):
-        file_input = open(self.options['inFilenameOBJ'], 'r')
-
-        self.options['numVerts'] = 0
+        file_input = open(self.inFilenameOBJ, 'r')
 
         xsum = 0
         ysum = 0
@@ -50,7 +193,8 @@ class Converter():
 
         for line in file_input:
             if (re.search(r'v\s+.*', line)):
-                self.options['numVerts'] = self.options['numVerts'] + 1
+                self.numVerts += 1
+
                 tokens = line.split(' ')
                 # remove space
                 tokens.pop(1)
@@ -59,7 +203,7 @@ class Converter():
                 ysum += float(tokens[2])
                 zsum += float(tokens[3])
 
-                if (self.options['numVerts'] == 1):
+                if self.numVerts == 1:
                     xmin = float(tokens[1])
                     xmax = float(tokens[1])
                     ymin = float(tokens[2])
@@ -85,43 +229,40 @@ class Converter():
         file_input.close()
 
         #  Calculate the center
-        if not self.options['xcen']:
-            self.options['xcen'] = xsum / self.options['numVerts']
-            self.options['ycen'] = ysum / self.options['numVerts']
-            self.options['zcen'] = zsum / self.options['numVerts']
+        if not self.xcen:
+            self.xcen = xsum / self.numVerts
+            self.ycen = ysum / self.numVerts
+            self.zcen = zsum / self.numVerts
 
         # Calculate the scale factor
-        if not self.options['scalefac']:
+        if not self.scalefac:
             xdiff = (xmax - xmin)
             ydiff = (ymax - ymin)
             zdiff = (zmax - zmin)
 
             if ((xdiff >= ydiff) and (xdiff >= zdiff)):
-                self.options['scalefac'] = xdiff
-            elif ( ( ydiff >= xdiff ) and ( ydiff >= zdiff ) ):
-                self.options['scalefac'] = ydiff
+                self.scalefac = xdiff
+            elif ((ydiff >= xdiff) and (ydiff >= zdiff)):
+                self.scalefac = ydiff
             else:
-                self.options['scalefac'] = zdiff
+                self.scalefac = zdiff
 
-            self.options['scalefac'] = 1.0 / self.options['scalefac']
-
+            self.scalefac = 1.0 / self.scalefac
 
     def printInputAndOptions(self):
-        print "Input files: '%s', '%s'" % (self.options['inFilenameOBJ'], self.options['inFilenameMTL'])
-        print "Output files: '%s', '%s'" % (self.options['outFilenameOBJ'], self.options['outFilenameMTL'])
-        print "Object names: '%s', '%s'" % (self.options['objectOBJ'], self.options['objectMTL'])
-        print "Center: <%s, %s, %s>" % (self.options['xcen'], self.options['ycen'], self.options['zcen'])
-        print "Scale by: %s" % self.options['scalefac']
-
+        print "Input files: '%s', '%s'" % (self.inFilenameOBJ, self.inFilenameMTL)
+        print "Output files: '%s', '%s'" % (self.outFilenameOBJ, self.outFilenameMTL)
+        print "Object names: '%s', '%s'" % (self.objectOBJ, self.objectMTL)
+        print "Center: <%s, %s, %s>" % (self.xcen, self.ycen, self.zcen)
+        print "Scale by: %s" % self.scalefac
 
     def printStatistics(self):
         print "----------------"
-        print "Vertices: %s" % self.options['numVerts']
-        print "Faces: %s" % self.options['numFaces']
-        print "Texture Coords: %s" % self.options['numTexture']
-        print "Normals: %s" % self.options['numNormals']
-        print "Materials: %s" % self.options['numMaterials']
-
+        print "Vertices: %s" % self.numVerts
+        print "Faces: %s" % self.numFaces
+        print "Texture Coords: %s" % self.numTexture
+        print "Normals: %s" % self.numNormals
+        print "Materials: %s" % self.numMaterials
 
     # Reads MTL components for ambient (Ka), diffuse (Kd),
     # specular (Ks), and exponent (Ns) values.
@@ -132,55 +273,54 @@ class Converter():
     # mValues[n][9] = Ns
     def loadDataMTL(self):
         # MTL data
-        self.options['numMaterials'] = -1
-        self.options['mValues'] = {}
+        self.numMaterials = -1
+        self.mValues = {}
 
-        file_input = open(self.options['inFilenameMTL'], 'r')
+        file_input = open(self.inFilenameMTL, 'r')
 
         for line in file_input:
             # materials
             if re.search(r'newmtl\s+.*', line):
-                self.options['numMaterials'] = self.options['numMaterials'] + 1
-                self.options['mValues'][self.options['numMaterials']] = {}
+                self.numMaterials = self.numMaterials + 1
+                self.mValues[self.numMaterials] = {}
 
                 # initialize material array
                 for i in xrange(0, 9):
-                    self.options['mValues'][self.options['numMaterials']][i] = 0.0
+                    self.mValues[self.numMaterials][i] = 0.0
 
-                self.options['mValues'][self.options['numMaterials']][9] = 1.0
+                self.mValues[self.numMaterials][9] = 1.0
 
                 tokens = line.split(' ')
-                self.options['mNames'][self.options['numMaterials']] = tokens[1]
+                self.mNames[self.numMaterials] = tokens[1]
 
             # ambient
             if re.search(r'\s+Ka\s+.*', line):
                 tokens = line.split(' ')
-                self.options['mValues'][self.options['numMaterials']][0] = "%.3f" % float(tokens[1])
-                self.options['mValues'][self.options['numMaterials']][1] = "%.3f" % float(tokens[2])
-                self.options['mValues'][self.options['numMaterials']][2] = "%.3f" % float(tokens[3])
+                self.mValues[self.numMaterials][0] = "%.3f" % float(tokens[1])
+                self.mValues[self.numMaterials][1] = "%.3f" % float(tokens[2])
+                self.mValues[self.numMaterials][2] = "%.3f" % float(tokens[3])
 
             # diffuse
             if re.search(r'\s+Kd\s+.*', line):
                 tokens = line.split(' ')
-                self.options['mValues'][self.options['numMaterials']][3] = "%.3f" % float(tokens[1])
-                self.options['mValues'][self.options['numMaterials']][4] = "%.3f" % float(tokens[2])
-                self.options['mValues'][self.options['numMaterials']][5] = "%.3f" % float(tokens[3])
+                self.mValues[self.numMaterials][3] = "%.3f" % float(tokens[1])
+                self.mValues[self.numMaterials][4] = "%.3f" % float(tokens[2])
+                self.mValues[self.numMaterials][5] = "%.3f" % float(tokens[3])
 
             # specular
             if re.search(r'\s+Ks\s+.*', line):
                 tokens = line.split(' ')
-                self.options['mValues'][self.options['numMaterials']][6] = "%.3f" % float(tokens[1])
-                self.options['mValues'][self.options['numMaterials']][7] = "%.3f" % float(tokens[2])
-                self.options['mValues'][self.options['numMaterials']][8] = "%.3f" % float(tokens[3])
+                self.mValues[self.numMaterials][6] = "%.3f" % float(tokens[1])
+                self.mValues[self.numMaterials][7] = "%.3f" % float(tokens[2])
+                self.mValues[self.numMaterials][8] = "%.3f" % float(tokens[3])
 
             # exponent
             if re.search(r'\s+Ns\s+.*', line):
                 tokens = line.split(' ')
-                self.options['mValues'][self.options['numMaterials']][9] = "%.3f" % float(tokens[1])
+                self.mValues[self.numMaterials][9] = "%.3f" % float(tokens[1])
 
         file_input.close()
-        self.options['numMaterials'] += 1
-
+        self.numMaterials += 1
 
     # reads vertices into $xcoords[], $ycoords[], $zcoords[]
     #   where coordinates are moved and scaled according to
@@ -197,39 +337,39 @@ class Converter():
     #   also, $face_line[] store actual face string
     def loadDataOBJ(self):
         # OBJ data
-        self.options['numVerts'] = 0
-        self.options['numFaces'] = 0
-        self.options['numTexture'] = 0
-        self.options['numNormals'] = 0
+        self.numVerts = 0
+        self.numFaces = 0
+        self.numTexture = 0
+        self.numNormals = 0
 
-        self.options['xcoords'] = {}
-        self.options['ycoords'] = {}
-        self.options['zcoords'] = {}
-        self.options['tx'] = {}
-        self.options['ty'] = {}
-        self.options['nx'] = {}
-        self.options['ny'] = {}
-        self.options['nz'] = {}
+        self.xcoords = {}
+        self.ycoords = {}
+        self.zcoords = {}
+        self.tx = {}
+        self.ty = {}
+        self.nx = {}
+        self.ny = {}
+        self.nz = {}
 
-        self.options['va_idx'] = {}
-        self.options['ta_idx'] = {}
-        self.options['na_idx'] = {}
+        self.va_idx = {}
+        self.ta_idx = {}
+        self.na_idx = {}
 
-        self.options['vb_idx'] = {}
-        self.options['tb_idx'] = {}
-        self.options['nb_idx'] = {}
+        self.vb_idx = {}
+        self.tb_idx = {}
+        self.nb_idx = {}
 
-        self.options['vc_idx'] = {}
-        self.options['tc_idx'] = {}
-        self.options['nc_idx'] = {}
+        self.vc_idx = {}
+        self.tc_idx = {}
+        self.nc_idx = {}
 
-        self.options['face_line'] = {}
-        self.options['face_mtl'] = {}
+        self.face_line = {}
+        self.face_mtl = {}
 
         # MTL data
-        self.options['mtl'] = 0
+        self.mtl = 0
 
-        file_input = open(self.options['inFilenameOBJ'], 'r')
+        file_input = open(self.inFilenameOBJ, 'r')
 
         for line in file_input:
 
@@ -239,25 +379,24 @@ class Converter():
                 # remove space
                 tokens.pop(1)
 
-                x = (float(tokens[1]) - self.options['xcen']) * self.options['scalefac']
-                y = (float(tokens[2]) - self.options['ycen']) * self.options['scalefac']
-                z = (float(tokens[3]) - self.options['zcen']) * self.options['scalefac']
-                self.options['xcoords'][self.options['numVerts']] = "%.3f" % float(x)
-                self.options['ycoords'][self.options['numVerts']] = "%.3f" % float(y)
-                self.options['zcoords'][self.options['numVerts']] = "%.3f" % float(z)
+                x = (float(tokens[1]) - self.xcen) * self.scalefac
+                y = (float(tokens[2]) - self.ycen) * self.scalefac
+                z = (float(tokens[3]) - self.zcen) * self.scalefac
+                self.xcoords[self.numVerts] = "%.3f" % float(x)
+                self.ycoords[self.numVerts] = "%.3f" % float(y)
+                self.zcoords[self.numVerts] = "%.3f" % float(z)
 
-                self.options['numVerts'] += 1
-
+                self.numVerts += 1
 
             # texture coords
             if (re.search(r'vt\s+.*', line)):
                 tokens = line.split(' ')
                 x = float(tokens[1])
                 y = 1 - float(tokens[2])
-                self.options['tx'][self.options['numTexture']] = "%.3f" % float(x)
-                self.options['ty'][self.options['numTexture']] = "%.3f" % float(y)
+                self.tx[self.numTexture] = "%.3f" % float(x)
+                self.ty[self.numTexture] = "%.3f" % float(y)
 
-                self.options['numTexture'] += 1
+                self.numTexture += 1
 
             # normals
             if (re.search(r'vn\s+.*', line)):
@@ -265,11 +404,11 @@ class Converter():
                 x = tokens[1]
                 y = tokens[2]
                 z = tokens[3]
-                self.options['nx'][self.options['numNormals']] = "%.3f" % float(x)
-                self.options['ny'][self.options['numNormals']] = "%.3f" % float(y)
-                self.options['nz'][self.options['numNormals']] = "%.3f" % float(z)
+                self.nx[self.numNormals] = "%.3f" % float(x)
+                self.ny[self.numNormals] = "%.3f" % float(y)
+                self.nz[self.numNormals] = "%.3f" % float(z)
 
-                self.options['numNormals'] += 1
+                self.numNormals += 1
 
             # faces
             regexp = re.compile(r'f\s+([^ ]+)\s+([^ ]+)\s+([^ ]+)(\s+([^ ]+))?')
@@ -280,165 +419,162 @@ class Converter():
                 b = map(float, f2.split('/'))
                 c = map(float, f3.split('/'))
 
-                self.options['va_idx'][self.options['numFaces']] = a[0] - 1
-                self.options['ta_idx'][self.options['numFaces']] = a[1] - 1
-                self.options['na_idx'][self.options['numFaces']] = a[2] - 1
+                self.va_idx[self.numFaces] = a[0] - 1
+                self.ta_idx[self.numFaces] = a[1] - 1
+                self.na_idx[self.numFaces] = a[2] - 1
 
-                self.options['vb_idx'][self.options['numFaces']] = b[0] - 1
-                self.options['tb_idx'][self.options['numFaces']] = b[1] - 1
-                self.options['nb_idx'][self.options['numFaces']] = b[2] - 1
+                self.vb_idx[self.numFaces] = b[0] - 1
+                self.tb_idx[self.numFaces] = b[1] - 1
+                self.nb_idx[self.numFaces] = b[2] - 1
 
-                self.options['vc_idx'][self.options['numFaces']] = c[0] - 1
-                self.options['tc_idx'][self.options['numFaces']] = c[1] - 1
-                self.options['nc_idx'][self.options['numFaces']] = c[2] - 1
+                self.vc_idx[self.numFaces] = c[0] - 1
+                self.tc_idx[self.numFaces] = c[1] - 1
+                self.nc_idx[self.numFaces] = c[2] - 1
 
-                self.options['face_line'][self.options['numFaces']] = line
-                self.options['face_mtl'][self.options['numFaces']] = self.options['mNames'][self.options['mtl']]
+                self.face_line[self.numFaces] = line
+                self.face_mtl[self.numFaces] = self.mNames[self.mtl]
 
-                self.options['numFaces'] += 1
+                self.numFaces += 1
 
                 # rectangle => second triangle
                 if f5 != "":
                     d = map(float, f5.split('/'))
-                    self.options['va_idx'][self.options['numFaces']] = a[0] - 1
-                    self.options['ta_idx'][self.options['numFaces']] = a[1] - 1
-                    self.options['na_idx'][self.options['numFaces']] = a[2] - 1
+                    self.va_idx[self.numFaces] = a[0] - 1
+                    self.ta_idx[self.numFaces] = a[1] - 1
+                    self.na_idx[self.numFaces] = a[2] - 1
 
-                    self.options['vb_idx'][self.options['numFaces']] = d[0] - 1
-                    self.options['tb_idx'][self.options['numFaces']] = d[1] - 1
-                    self.options['nb_idx'][self.options['numFaces']] = d[2] - 1
+                    self.vb_idx[self.numFaces] = d[0] - 1
+                    self.tb_idx[self.numFaces] = d[1] - 1
+                    self.nb_idx[self.numFaces] = d[2] - 1
 
-                    self.options['vc_idx'][self.options['numFaces']] = c[0] - 1
-                    self.options['tc_idx'][self.options['numFaces']] = c[1] - 1
-                    self.options['nc_idx'][self.options['numFaces']] = c[2] - 1
+                    self.vc_idx[self.numFaces] = c[0] - 1
+                    self.tc_idx[self.numFaces] = c[1] - 1
+                    self.nc_idx[self.numFaces] = c[2] - 1
 
-                    self.options['face_line'][self.options['numFaces']] = line
-                    self.options['face_mtl'][self.options['numFaces']] = self.options['mNames'][self.options['mtl']]
+                    self.face_line[self.numFaces] = line
+                    self.face_mtl[self.numFaces] = self.mNames[self.mtl]
 
-                    self.options['numFaces'] = self.options['numFaces'] + 1
+                    self.numFaces = self.numFaces + 1
 
             # materials
             if (re.search(r'usemtl\s+.*', line)):
                 tokens = line.split(' ')
 
                 i = 0
-                for mName in self.options['mNames']:
+                for mName in self.mNames:
                     if tokens[1] == mName:
-                        self.options['mtl'] = i
+                        self.mtl = i
 
                     i += 1
 
         file_input.close()
 
-
     def normalizeNormals(self):
-        for j in xrange(self.options['numNormals']):
-            d = math.sqrt(float(self.options['nx'][j]) * float(self.options['nx'][j]) + float(self.options['ny'][j]) * float(self.options['ny'][j]) + float(self.options['nz'][j]) * float(self.options['nz'][j]))
+        for j in xrange(self.numNormals):
+            d = math.sqrt(float(self.nx[j]) * float(self.nx[j]) + float(self.ny[j]) * float(self.ny[j]) + float(self.nz[j]) * float(self.nz[j]))
 
             if d == 0:
-                self.options['nx'][j] = 1
-                self.options['ny'][j] = 0
-                self.options['nz'][j] = 0
+                self.nx[j] = 1
+                self.ny[j] = 0
+                self.nz[j] = 0
             else:
-                self.options['nx'][j] = "%.3f" % (float(self.options['nx'][j]) / d)
-                self.options['ny'][j] = "%.3f" % (float(self.options['ny'][j]) / d)
-                self.options['nz'][j] = "%.3f" % (float(self.options['nz'][j]) / d)
-
+                self.nx[j] = "%.3f" % (float(self.nx[j]) / d)
+                self.ny[j] = "%.3f" % (float(self.ny[j]) / d)
+                self.nz[j] = "%.3f" % (float(self.nz[j]) / d)
 
     def writeOutputOBJ(self):
-        self.options['mCount'] = {}
+        self.mCount = {}
 
-        file_input = open(self.options['outFilenameOBJ'], 'w')
+        file_input = open(self.outFilenameOBJ, 'w')
 
         file_input.write("// Created with mtl2opengl.py\n\n")
 
         # some statistics
         file_input.write("/*\n")
-        file_input.write("source files: %s, %s\n" % (self.options['inFilenameOBJ'], self.options['inFilenameMTL']))
-        file_input.write("vertices: %s\n" % self.options['numVerts'])
-        file_input.write("faces: %s\n" % self.options['numFaces'])
-        file_input.write("normals: %s\n" % self.options['numNormals'])
-        file_input.write("texture coords: %s\n" % self.options['numTexture'])
+        file_input.write("source files: %s, %s\n" % (self.inFilenameOBJ, self.inFilenameMTL))
+        file_input.write("vertices: %s\n" % self.numVerts)
+        file_input.write("faces: %s\n" % self.numFaces)
+        file_input.write("normals: %s\n" % self.numNormals)
+        file_input.write("texture coords: %s\n" % self.numTexture)
         file_input.write("*/\n")
         file_input.write("\n\n")
 
         # needed constant for glDrawArrays
-        file_input.write("unsigned int " + self.options['objectOBJ'] + "NumVerts = " + str(self.options['numFaces'] * 3) + ";\n\n")
+        file_input.write("unsigned int " + self.objectOBJ + "NumVerts = " + str(self.numFaces * 3) + ";\n\n")
 
         # write verts
-        file_input.write("float " + self.options['objectOBJ'] + "Verts [] = {\n")
+        file_input.write("float " + self.objectOBJ + "Verts [] = {\n")
 
-        for i in xrange(self.options['numMaterials']):
-            self.options['mCount'][i] = 0
+        for i in xrange(self.numMaterials):
+            self.mCount[i] = 0
 
-            for j in xrange(self.options['numFaces']):
-                if self.options['face_mtl'][j] == self.options['mNames'][i]:
-                    ia = self.options['va_idx'][j]
-                    ib = self.options['vb_idx'][j]
-                    ic = self.options['vc_idx'][j]
-                    file_input.write("%.3f,%.3f,%.3f,\n" % (float(self.options['xcoords'][ia]), float(self.options['ycoords'][ia]), float(self.options['zcoords'][ia])))
-                    file_input.write("%.3f,%.3f,%.3f,\n" % (float(self.options['xcoords'][ib]), float(self.options['ycoords'][ib]), float(self.options['zcoords'][ib])))
-                    file_input.write("%.3f,%.3f,%.3f,\n" % (float(self.options['xcoords'][ic]), float(self.options['ycoords'][ic]), float(self.options['zcoords'][ic])))
+            for j in xrange(self.numFaces):
+                if self.face_mtl[j] == self.mNames[i]:
+                    ia = self.va_idx[j]
+                    ib = self.vb_idx[j]
+                    ic = self.vc_idx[j]
+                    file_input.write("%.3f,%.3f,%.3f,\n" % (float(self.xcoords[ia]), float(self.ycoords[ia]), float(self.zcoords[ia])))
+                    file_input.write("%.3f,%.3f,%.3f,\n" % (float(self.xcoords[ib]), float(self.ycoords[ib]), float(self.zcoords[ib])))
+                    file_input.write("%.3f,%.3f,%.3f,\n" % (float(self.xcoords[ic]), float(self.ycoords[ic]), float(self.zcoords[ic])))
 
-                    self.options['mCount'][i] += 3
+                    self.mCount[i] += 3
 
         file_input.write("};\n\n")
 
         # write normals
-        if self.options['numNormals'] > 0:
-            file_input.write("float " + self.options['objectOBJ'] + "Normals [] = {\n")
-            for i in xrange(self.options['numMaterials']):
-                for j in xrange(self.options['numFaces']):
-                    if self.options['face_mtl'][j] == self.options['mNames'][i]:
-                        ia = self.options['na_idx'][j]
-                        ib = self.options['nb_idx'][j]
-                        ic = self.options['nc_idx'][j]
-                        file_input.write("%s,%s,%s,\n" % (self.options['nx'][ia], self.options['ny'][ia], self.options['nz'][ia]))
-                        file_input.write("%s,%s,%s,\n" % (self.options['nx'][ib], self.options['ny'][ib], self.options['nz'][ib]))
-                        file_input.write("%s,%s,%s,\n" % (self.options['nx'][ic], self.options['ny'][ic], self.options['nz'][ic]))
+        if self.numNormals > 0:
+            file_input.write("float " + self.objectOBJ + "Normals [] = {\n")
+            for i in xrange(self.numMaterials):
+                for j in xrange(self.numFaces):
+                    if self.face_mtl[j] == self.mNames[i]:
+                        ia = self.na_idx[j]
+                        ib = self.nb_idx[j]
+                        ic = self.nc_idx[j]
+                        file_input.write("%s,%s,%s,\n" % (self.nx[ia], self.ny[ia], self.nz[ia]))
+                        file_input.write("%s,%s,%s,\n" % (self.nx[ib], self.ny[ib], self.nz[ib]))
+                        file_input.write("%s,%s,%s,\n" % (self.nx[ic], self.ny[ic], self.nz[ic]))
 
             file_input.write("};\n\n")
 
         # write texture coords
-        if self.options['numTexture']:
-            file_input.write("float " + self.options['objectOBJ'] + "TexCoords [] = {\n")
-            for i in xrange(self.options['numMaterials']):
-                for j in xrange(self.options['numFaces']):
-                    if self.options['face_mtl'][j] == self.options['mNames'][i]:
-                        ia = self.options['ta_idx'][j]
-                        ib = self.options['tb_idx'][j]
-                        ic = self.options['tc_idx'][j]
-                        file_input.write("%s,%s,\n" % (self.options['tx'][ia], self.options['ty'][ia]))
-                        file_input.write("%s,%s,\n" % (self.options['tx'][ib], self.options['ty'][ib]))
-                        file_input.write("%s,%s,\n" % (self.options['tx'][ic], self.options['ty'][ic]))
+        if self.numTexture:
+            file_input.write("float " + self.objectOBJ + "TexCoords [] = {\n")
+            for i in xrange(self.numMaterials):
+                for j in xrange(self.numFaces):
+                    if self.face_mtl[j] == self.mNames[i]:
+                        ia = self.ta_idx[j]
+                        ib = self.tb_idx[j]
+                        ic = self.tc_idx[j]
+                        file_input.write("%s,%s,\n" % (self.tx[ia], self.ty[ia]))
+                        file_input.write("%s,%s,\n" % (self.tx[ib], self.ty[ib]))
+                        file_input.write("%s,%s,\n" % (self.tx[ic], self.ty[ic]))
 
             file_input.write("};\n\n")
 
         file_input.close()
 
-
     def writeOutputMTL(self):
-        file_input = open(self.options['outFilenameMTL'], 'w')
+        file_input = open(self.outFilenameMTL, 'w')
 
         file_input.write("// Created with mtl2opengl.pl\n\n")
 
         # some statistics
         file_input.write("/*\n")
-        file_input.write("source files: %s, %s\n" % (self.options['inFilenameOBJ'], self.options['inFilenameMTL']))
-        file_input.write("materials: %s\n\n" % self.options['numMaterials'])
-        for i in xrange(self.options['numMaterials']):
-            kaR = float(self.options['mValues'][i][0])
-            kaG = float(self.options['mValues'][i][1])
-            kaB = float(self.options['mValues'][i][2])
-            kdR = float(self.options['mValues'][i][3])
-            kdG = float(self.options['mValues'][i][4])
-            kdB = float(self.options['mValues'][i][5])
-            ksR = float(self.options['mValues'][i][6])
-            ksG = float(self.options['mValues'][i][7])
-            ksB = float(self.options['mValues'][i][8])
-            nsE = float(self.options['mValues'][i][9])
+        file_input.write("source files: %s, %s\n" % (self.inFilenameOBJ, self.inFilenameMTL))
+        file_input.write("materials: %s\n\n" % self.numMaterials)
+        for i in xrange(self.numMaterials):
+            kaR = float(self.mValues[i][0])
+            kaG = float(self.mValues[i][1])
+            kaB = float(self.mValues[i][2])
+            kdR = float(self.mValues[i][3])
+            kdG = float(self.mValues[i][4])
+            kdB = float(self.mValues[i][5])
+            ksR = float(self.mValues[i][6])
+            ksG = float(self.mValues[i][7])
+            ksB = float(self.mValues[i][8])
+            nsE = float(self.mValues[i][9])
 
-            file_input.write("Name: %s" % self.options['mNames'][i])
+            file_input.write("Name: %s" % self.mNames[i])
             file_input.write("Ka: %.3f, %.3f, %.3f\n" % (kaR, kaG, kaB))
             file_input.write("Kd: %.3f, %.3f, %.3f\n" % (kdR, kdG, kdB))
             file_input.write("Ks: %.3f, %.3f, %.3f\n" % (ksR, ksG, ksB))
@@ -448,65 +584,65 @@ class Converter():
         file_input.write("\n\n")
 
         # needed constant for glDrawArrays
-        file_input.write("int " + self.options['objectMTL'] + "NumMaterials = " + str(self.options['numMaterials']) + ";\n\n")
+        file_input.write("int " + self.objectMTL + "NumMaterials = " + str(self.numMaterials) + ";\n\n")
 
         # write firsts
-        file_input.write("int " + self.options['objectMTL'] + "First [" + str(self.options['numMaterials']) + "] = {\n")
-        for i in xrange(self.options['numMaterials']):
+        file_input.write("int " + self.objectMTL + "First [" + str(self.numMaterials) + "] = {\n")
+        for i in xrange(self.numMaterials):
             if i == 0:
                 first = 0
             else:
-                first += self.options['mCount'][i - 1]
+                first += self.mCount[i - 1]
 
             file_input.write("%s,\n" % first)
 
         file_input.write("};\n\n")
 
         # write counts
-        file_input.write("int " + self.options['objectMTL'] + "Count [" + str(self.options['numMaterials']) + "] = {\n")
-        for i in xrange(self.options['numMaterials']):
-            count = self.options['mCount'][i]
+        file_input.write("int " + self.objectMTL + "Count [" + str(self.numMaterials) + "] = {\n")
+        for i in xrange(self.numMaterials):
+            count = self.mCount[i]
             file_input.write("%s,\n" % count)
 
         file_input.write("};\n\n")
 
         # write ambients
-        file_input.write("float " + self.options['objectMTL'] + "Ambient [" + str(self.options['numMaterials']) + "][3] = {\n")
-        for i in xrange(self.options['numMaterials']):
-            kaR = float(self.options['mValues'][i][0])
-            kaG = float(self.options['mValues'][i][1])
-            kaB = float(self.options['mValues'][i][2])
+        file_input.write("float " + self.objectMTL + "Ambient [" + str(self.numMaterials) + "][3] = {\n")
+        for i in xrange(self.numMaterials):
+            kaR = float(self.mValues[i][0])
+            kaG = float(self.mValues[i][1])
+            kaB = float(self.mValues[i][2])
 
             file_input.write("%.3f,%.3f,%.3f,\n" % (kaR, kaG, kaB))
 
         file_input.write("};\n\n")
 
         # write diffuses
-        file_input.write("float " + self.options['objectMTL'] + "Diffuse [" + str(self.options['numMaterials']) + "][3] = {\n")
-        for i in xrange(self.options['numMaterials']):
-            kdR = float(self.options['mValues'][i][3])
-            kdG = float(self.options['mValues'][i][4])
-            kdB = float(self.options['mValues'][i][5])
+        file_input.write("float " + self.objectMTL + "Diffuse [" + str(self.numMaterials) + "][3] = {\n")
+        for i in xrange(self.numMaterials):
+            kdR = float(self.mValues[i][3])
+            kdG = float(self.mValues[i][4])
+            kdB = float(self.mValues[i][5])
 
             file_input.write("%.3f,%.3f,%.3f,\n" % (kdR, kdG, kdB))
 
         file_input.write("};\n\n")
 
         # write speculars
-        file_input.write("float " + self.options['objectMTL'] + "Specular [" + str(self.options['numMaterials']) + "][3] = {\n")
-        for i in xrange(self.options['numMaterials']):
-            ksR = float(self.options['mValues'][i][6])
-            ksG = float(self.options['mValues'][i][7])
-            ksB = float(self.options['mValues'][i][8])
+        file_input.write("float " + self.objectMTL + "Specular [" + str(self.numMaterials) + "][3] = {\n")
+        for i in xrange(self.numMaterials):
+            ksR = float(self.mValues[i][6])
+            ksG = float(self.mValues[i][7])
+            ksB = float(self.mValues[i][8])
 
             file_input.write("%.3f,%.3f,%.3f,\n" % (ksR, ksG, ksB))
 
         file_input.write("};\n\n")
 
         # write exponents
-        file_input.write("float " + self.options['objectMTL'] + "Exponent [" + str(self.options['numMaterials']) + "] = {\n")
-        for i in xrange(self.options['numMaterials']):
-            nsE = float(self.options['mValues'][i][9])
+        file_input.write("float " + self.objectMTL + "Exponent [" + str(self.numMaterials) + "] = {\n")
+        for i in xrange(self.numMaterials):
+            nsE = float(self.mValues[i][9])
 
             file_input.write("%.3f,\n" % nsE)
 
@@ -517,81 +653,45 @@ class Converter():
 
 # main function call
 if __name__ == '__main__':
-    def fileparse(path):
-        (dirName, fileName) = os.path.split(path)
-        (fileBaseName, fileExtension) = os.path.splitext(fileName)
-        return (fileBaseName, dirName, fileExtension)
-
-
-    parser = argparse.ArgumentParser(description='Process converter.')
-    parser.add_argument('--man', metavar='', help='')
-    parser.add_argument('--noScale', metavar='', help='')
-    parser.add_argument('--scale', metavar='', help='')
-    parser.add_argument('--noMove', metavar='', help='')
-    parser.add_argument('--center', metavar='', help='')
-    parser.add_argument('--verbose', metavar='', help='')
-    parser.add_argument('--objfile', metavar='', help='')
-    parser.add_argument('--mtlfile', metavar='', help='')
+    parser = argparse.ArgumentParser(description='An OBJ file consisting of vertices (v), texture coords (vt) and normals (vn). \
+        The corresponding MTL file consisting of ambient (Ka), diffuse (Kd), specular (Ks), and exponent (Ns) components. \
+        The resulting .H files offer three float arrays for the OBJ geometry data and \
+        four float arrays for the MTL material data to be rendered.')
+    parser.add_argument('--center', metavar='N/N/N', help='Sets center point of the object to centralize. The format is "N" as a number: N/N/N.')
+    parser.add_argument('--noMove', metavar='1/0', help='Prevents automatic scaling. Otherwise the object will be moved to the center of its vertices.')
+    parser.add_argument('--noScale', metavar='1/0', help='Prevents automatic scaling. Otherwise the object will be scaled such the the longest dimension is 1 unit.')
+    parser.add_argument('--scale', metavar='0..1',
+                        help='Sets the scale factor explicitly. Please be aware that negative numbers are not handled correctly regarding the orientation of the normals.')
+    parser.add_argument('--verbose', metavar='1/0', help='Runs this script logging some information.')
+    parser.add_argument('--mtlfile', metavar='<mtlfile path>', help='Sets the .mtl file path.', required=True)
+    parser.add_argument('--objfile', metavar='<objfile path>', help='Sets the .obj file path.', required=True)
 
     args = parser.parse_args()
-    options = {
-        'man': args.man,
-        'noScale': args.noScale,
-        'scale': args.scale,
-        'noMove': args.noMove,
-        'center': args.center,
-        'verbose': args.verbose,
-        'scalefac': 0,
-        'xcen': None,
-        'ycen': None,
-        'zcen': None,
-        'mNames': {},
-        'mValues': {}
-    }
-
-    if options['noScale']:
-        options['scalefac'] = 1
-    elif options['scalefac'] < 0:
-        raise ParameterInvalidException()
-
-    if options['noMove']:
-        options['center'] = '0/0/0'
-
-    if options['center']:
-        center = options['center'].split('/')
-        options['xcen'] = center[0]
-        options['ycen'] = center[1]
-        options['zcen'] = center[2]
-
     objfile = args.objfile
-    if not objfile:
-        raise ParameterInvalidException()
-
     mtlfile = args.mtlfile
-    if not mtlfile:
+    scalefac = args.scale
+    verbose = args.verbose
+    no_scale = args.noScale
+    no_move = args.noMove
+    center = args.center
+    xcen = None
+    ycen = None
+    zcen = None
+
+    if no_scale:
+        scalefac = 1
+    elif scalefac < 0:
         raise ParameterInvalidException()
 
-    (fileOBJ, dirOBJ, extOBJ) = fileparse(objfile)
-    options['inFilenameOBJ'] = '%s/%s%s' % (dirOBJ, fileOBJ, extOBJ)
+    if no_move:
+        center = '0/0/0'
 
-    (fileMTL, dirMTL, extMTL) = fileparse(mtlfile)
-    options['inFilenameMTL'] = '%s/%s%s' % (dirMTL, fileMTL, extMTL)
-
-    (fileOBJ, dirOBJ, extOBJ) = fileparse(options['inFilenameOBJ'])
-    options['outFilenameOBJ'] = '%s/%s%s' % (dirOBJ, fileOBJ, "OBJ.h")
-
-    (fileMTL, dirMTL, extMTL) = fileparse(options['inFilenameMTL'])
-    options['outFilenameMTL'] = '%s/%s%s' % (dirMTL, fileMTL, "MTL.h")
-
-    (fileOBJ, dirOBJ, extOBJ) = fileparse(options['inFilenameOBJ'])
-    options['objectOBJ'] = '%s%s' % (fileOBJ, "OBJ")
-
-    (fileMTL, dirMTL, extMTL) = fileparse(options['inFilenameMTL'])
-    options['objectMTL'] = '%s%s' % (fileMTL, "MTL")
-
-    if not os.path.exists(options['inFilenameOBJ']) or not os.path.exists(options['inFilenameMTL']):
-        raise ParameterInvalidException()
+    if center:
+        center = center.split('/')
+        xcen = center[0]
+        ycen = center[1]
+        zcen = center[2]
 
     # start converter
-    converter = Converter(options)
+    converter = Converter(scalefac=scalefac, verbose=verbose, xcen=xcen, ycen=ycen, zcen=zcen, objfile=objfile, mtlfile=mtlfile)
     converter.init()
