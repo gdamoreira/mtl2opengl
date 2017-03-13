@@ -13,7 +13,9 @@ mtl2opengl is a python script for converting .obj and .mtl data files into array
 ## INSTRUCTIONS
 To run the script with its default settings, type the following into the command line terminal:
 
+```
 python mtl2opengl.py --objfile model.obj --mtlfile model.mtl
+```
 
 where model.obj and model.mtl are the .obj and corresponding .mtl files of your 3D model.
 
