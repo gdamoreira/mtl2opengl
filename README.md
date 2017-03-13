@@ -1,6 +1,6 @@
 # mtl2opengl
 
-mtl2opengl Version 1.1 (13 March 2017)
+mtl2opengl Version 1.2 (13 March 2017)
 
 Copyright © 2017 Guilherme D'Amoreira
 
