@@ -600,7 +600,7 @@ class Converter():
     def write_output_mtl(self):
         file_input = open(self.out_filename_mtl, 'w')
 
-        file_input.write("// Created with mtl2opengl.pl\n\n")
+        file_input.write("// Created with mtl2opengl.py\n\n")
 
         # some statistics
         file_input.write("/*\n")
